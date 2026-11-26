@@ -1,0 +1,19 @@
+name: I think this is new
+description: You know the area and have not seen this result or this argument.
+title: "[ITEM] new: "
+labels: ["verdict:new"]
+body:
+  - type: input
+    id: item
+    attributes:
+      label: Item
+      description: The id shown at the top of the item's page, for example A01 or B07.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What you know
+      description: What is closest in the literature, and why this is not it. Say how well you know the area.
+    validations:
+      required: true

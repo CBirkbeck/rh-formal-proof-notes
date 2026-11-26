@@ -1,0 +1,23 @@
+name: The summary is wrong
+description: The page misstates the result, the proof, or the literature.
+title: "[ITEM] correction: "
+labels: ["correction"]
+body:
+  - type: input
+    id: item
+    attributes:
+      label: Item
+      description: The id shown at the top of the item's page, for example A01 or B07.
+    validations:
+      required: true
+  - type: textarea
+    id: wrong
+    attributes:
+      label: What is wrong
+    validations:
+      required: true
+  - type: textarea
+    id: right
+    attributes:
+      label: What it should say
+      description: With a pointer to the Lean declaration or to the paper, if you have one.

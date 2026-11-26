@@ -1,0 +1,26 @@
+name: This is known
+description: The result, or the argument, is already in the literature. Tell us where.
+title: "[ITEM] known: "
+labels: ["verdict:known"]
+body:
+  - type: input
+    id: item
+    attributes:
+      label: Item
+      description: The id shown at the top of the item's page, for example A01 or B07.
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Where it is
+      description: Authors, title, year, and the theorem or section. A link helps.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How it compares
+      description: Is it the same statement, a stronger one, the same method in another setting? Which part of the item does it cover?
+    validations:
+      required: true

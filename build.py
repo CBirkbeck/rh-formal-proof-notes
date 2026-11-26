@@ -21,6 +21,7 @@ LEAN_REPO = "https://github.com/leanprover-community/riemann-hypothesis"
 LEAN_COMMIT = "40e56bab026552e089d7afcfeff08d2defb9c005"
 DISCUSS_REPO = os.environ.get("DISCUSS_REPO", "").rstrip("/")
 TALLY = {}
+IDS = set()  # ids of the items being built; a bare id such as B14 in running text becomes a link
 LISTS = [
     ("results", "Results that may be of independent interest",
      "Statements inside the formal proof that the checks did not find in the literature, or found only in a "
@@ -35,21 +36,33 @@ ORDER = ["Statement", "Why it might matter", "What the checks found", "Nearest p
          "How the formal proof goes", "Key steps", "What was checked, and what was not"]
 
 
+def plain(text):
+    """Escape running text and link bare item ids."""
+    return re.sub(r"\b([AB]\d\d)\b",
+                  lambda m: '<a href="%s.html">%s</a>' % (m.group(1), m.group(1)) if m.group(1) in IDS else m.group(1),
+                  html.escape(text))
+
+
 def inline(text):
-    """Escape, then render `code`, **bold**, *italic* and [text](url)."""
+    """Escape, then render `code`, **bold**, *italic*, [text](url) and bare addresses."""
     out, pos = [], 0
-    for m in re.finditer(r"`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?://[^)\s]+)\)|\*([^*\s][^*]*)\*", text):
-        out.append(html.escape(text[pos:m.start()]))
+    pattern = (r"`([^`]+)`|\*\*([^*]+)\*\*|\[([^\]]+)\]\((https?://[^)\s]+)\)|\*([^*\s][^*]*)\*"
+               r"|<(https?://[^>\s]+)>|(https?://[^\s<>()]*[^\s<>().,;:])")
+    for m in re.finditer(pattern, text):
+        out.append(plain(text[pos:m.start()]))
         if m.group(1) is not None:
             out.append("<code>" + html.escape(m.group(1)) + "</code>")
         elif m.group(2) is not None:
             out.append("<strong>" + html.escape(m.group(2)) + "</strong>")
         elif m.group(3) is not None:
             out.append('<a href="%s">%s</a>' % (html.escape(m.group(4), quote=True), html.escape(m.group(3))))
-        else:
+        elif m.group(5) is not None:
             out.append("<em>" + html.escape(m.group(5)) + "</em>")
+        else:
+            url = m.group(6) or m.group(7)
+            out.append('<a href="%s">%s</a>' % (html.escape(url, quote=True), html.escape(url)))
         pos = m.end()
-    out.append(html.escape(text[pos:]))
+    out.append(plain(text[pos:]))
     return "".join(out)
 
 
@@ -107,11 +120,20 @@ def parse(path):
 
 
 def lean_link(name, path, line, what):
+    """One linked declaration. `line` is `start` or `start-end`; with a range, the statement can be shown in
+    place: the reader's browser fetches those lines from the proof's own repository at the pinned commit."""
     url = "%s/blob/%s/%s" % (LEAN_REPO, LEAN_COMMIT, path)
-    if line.isdigit():
-        url += "#L" + line
-    return '<li><a href="%s"><code>%s</code></a> <span class="what">%s</span><br><span class="path">%s</span></li>' % (
-        html.escape(url, quote=True), html.escape(name), inline(what), html.escape(path))
+    start, _, end = line.partition("-")
+    show = ""
+    if start.isdigit():
+        url += "#L" + start + ("-L" + end if end.isdigit() else "")
+        if end.isdigit():
+            raw = "%s/%s/%s" % (LEAN_REPO.replace("github.com", "raw.githubusercontent.com"), LEAN_COMMIT, path)
+            show = ('<details class="src" data-raw="%s" data-start="%s" data-end="%s"><summary>Show the Lean '
+                    'statement</summary><pre>Loading from the proof\'s repository…</pre></details>'
+                    % (html.escape(raw, quote=True), start, end))
+    return ('<li><a href="%s"><code>%s</code></a> <span class="what">%s</span><br><span class="path">%s</span>%s</li>'
+            % (html.escape(url, quote=True), html.escape(name), inline(what), html.escape(path), show))
 
 
 def chip(kind, text):
@@ -135,14 +157,31 @@ details>summary{cursor:pointer;font-weight:600;padding:10px 0} details[open]>sum
 ul.lean{list-style:none;padding:0} ul.lean li{margin:.5em 0} .path{color:var(--mute);font-size:.82rem;word-break:break-all} .what{color:var(--mute)}
 .note{background:var(--soft);border-left:3px solid var(--line);padding:10px 14px;border-radius:6px;font-size:.95rem}
 .actions a{display:inline-block;margin:.3em .6em .3em 0;padding:.35em .8em;border:1px solid var(--line);border-radius:8px;text-decoration:none}
+details.src{border:0;padding:0;margin:.3em 0 0} details.src>summary{font-weight:400;font-size:.88rem;color:var(--link);padding:0}
+details.src[open]>summary{border:0;margin:0} details.src pre{background:var(--soft);padding:10px 12px;border-radius:6px;overflow:auto;font-size:.85rem;line-height:1.4}
 footer{color:var(--mute);font-size:.88rem;margin-top:3em;border-top:1px solid var(--line);padding-top:1em}
+"""
+
+
+JS = """
+document.querySelectorAll('details.src').forEach(function (d) {
+  d.addEventListener('toggle', function () {
+    if (!d.open || d.dataset.done) return;
+    d.dataset.done = '1';
+    var pre = d.querySelector('pre');
+    fetch(d.dataset.raw).then(function (r) { if (!r.ok) throw new Error(r.status); return r.text(); })
+      .then(function (t) { pre.textContent = t.split('\\n').slice(d.dataset.start - 1, d.dataset.end).join('\\n'); })
+      .catch(function () { pre.textContent = 'Could not load the file. Follow the link above to read it on GitHub.'; });
+  });
+});
 """
 
 
 def page(title, body):
     return ("<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">"
             "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>%s</title>"
-            "<style>%s</style></head><body><main>%s</main></body></html>") % (html.escape(title), CSS, body)
+            "<style>%s</style></head><body><main>%s</main><script>%s</script></body></html>") % (
+                html.escape(title), CSS, body, JS)
 
 
 FOOT = ("<footer>Every summary and verdict on these pages was written by AI models reading the Lean source and the "
@@ -183,6 +222,20 @@ def chips(head):
     return "".join(out)
 
 
+def summary(text, limit=400):
+    """The opening sentences of a paragraph, cut at a sentence end and never inside `code`."""
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    ends = [m.end() for m in re.finditer(r"[.;:](?= )", cut) if cut[:m.end()].count("`") % 2 == 0]
+    if ends and ends[-1] > 120:
+        return cut[:ends[-1]].rstrip(";:") + (" …" if not cut[:ends[-1]].endswith(".") else "")
+    if cut.count("`") % 2:
+        cut = cut[:cut.rfind("`")]
+    return cut.rsplit(" ", 1)[0] + " …"
+
+
 def main(items_dir, out_dir, tally=None):
     if tally and pathlib.Path(tally).exists():
         TALLY.update(json.loads(pathlib.Path(tally).read_text(encoding="utf-8")))
@@ -198,6 +251,8 @@ def main(items_dir, out_dir, tally=None):
             continue
         head.setdefault("list", "results" if head["id"].startswith("A") else "routes")
         items.append((head, lean, lit, sections))
+    IDS.update(it[0]["id"] for it in items)
+    for head, lean, lit, sections in items:
         body = ['<p><a href="index.html">All items</a></p>', "<h1>%s</h1>" % inline(head["title"]),
                 '<p class="meta">%s · %s</p>' % (html.escape(head["id"]), html.escape(head.get("area", ""))),
                 "<p>%s</p>" % chips(head), discuss(head, "item")]
@@ -219,7 +274,13 @@ def main(items_dir, out_dir, tally=None):
             '<p class="lede">Results and arguments found inside the formal Lean proof of the Riemann hypothesis for '
             "Dirichlet L-functions, each with a link to the Lean code, a plain-language account of what it says and "
             "how its proof goes, and what two AI models make of its novelty. Say what you know: is it new, is it in "
-            "the literature, is the summary wrong?</p>", discuss({}, "index")]
+            "the literature, is the summary wrong?</p>", discuss({}, "index"),
+            '<p class="note">How to read the labels. Every page was written by AI models, and none has been '
+            "checked by a specialist. A first reading compared each statement or argument with published work; an "
+            "independent second opinion was then asked whether that comparison stands. Where they disagree, the "
+            "page says so. &ldquo;Improves&rdquo;, &ldquo;incomparable&rdquo; and &ldquo;differs from the "
+            "published proof&rdquo; mean that a search did not find the statement or the argument in print, and "
+            "nothing more. Nothing was compiled; each page says how far the Lean source was read.</p>"]
     for key, title, lede in LISTS:
         group = [it for it in items if it[0]["list"] == key]
         if not group:
@@ -230,7 +291,7 @@ def main(items_dir, out_dir, tally=None):
             body.append('<div class="card"><h3><a href="%s.html">%s</a></h3><p class="meta">%s · %s</p><p>%s</p>'
                         "<p>%s</p></div>" % (html.escape(head["id"]), inline(head["title"]), html.escape(head["id"]),
                                              html.escape(head.get("area", "")), chips(head),
-                                             inline(" ".join(first.split())[:420])))
+                                             inline(summary(first))))
     body.append(FOOT)
     (out / "index.html").write_text(page("Inside the formal proof: what may be new", "\n".join(body)),
                                     encoding="utf-8")
